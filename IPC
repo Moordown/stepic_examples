@@ -1,0 +1,129 @@
+// shared memory
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+#include <stdio.h>
+#include <sys/select.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+// signals
+#include <errno.h>
+#include <string.h>
+#include <signal.h>
+#include <stdlib.h>
+char pathname[100];
+extern int errno;
+
+// читает фаловые дескрипторы из shared memory и закрывает их
+void mysignal_handler(int signalno){
+	// перед стоками стоит знак переноса строки, т.к. пользоваетелем посылается сигнал, и чтобы сохранить формат мы переносим.
+        int shmid; key_t key;
+        if ( (key=ftok(pathname, 0)) < 0 )
+        {
+                perror("\nCan't generate key in handler\n");
+                exit(1);
+        }
+
+	if( (shmid=shmget(key, sizeof(int)*2, 0)) < 0)
+        {
+                perror("\nCan't get shared memory in handler\n");
+                exit(1);
+        }
+        int *arr;
+        if( (arr=(int*)shmat(shmid, NULL, 0)) == (int*)-1 ){
+                perror("\nCan't attach to shared memory in handler\n");
+                exit(1);
+        }
+	int f1 = arr[0];
+	int f2 = arr[1];
+
+	printf("\nFd in handler #1 = %d, #2 = %d\n", f1, f2);
+
+	int res_rm = shmctl(shmid, IPC_RMID, NULL);
+	if( (res_rm) < 0 )
+	{
+		perror("Can't remove segment\n");
+		exit(1);
+	} 
+	close(f1); close(f2);	
+	
+	exit(0);
+}
+
+
+void read_and_report(int fd)
+{
+	char buf[100];
+	
+	printf("FD %d is ready\n", fd);
+	int bytes = read(fd, buf, 100);
+	
+	buf[bytes] = 0;
+	
+	printf("Get %d bytes from %d : %s\n", bytes, fd, buf);
+}
+
+int main(int argc, char* argv[])
+{	
+	strcpy(pathname, argv[0]);
+	printf("%s\n", pathname);
+	int shmid; key_t key;
+	if ( (key=ftok(pathname, 0)) < 0 )
+	{
+		perror("Can't generate key\n");
+		exit(1);
+	}
+	if( (shmid=shmget(key, sizeof(int)*2, 0666|IPC_CREAT|IPC_EXCL)) < 0)
+	{
+		perror("Can't create shared memory\n");
+		exit(1);
+	}
+
+	int f1 = open("./f1.fifo", O_RDWR);
+	int f2 = open("./f2.fifo", O_RDWR);
+
+	printf("Fd #1 = %d, #2 = %d\n", f1, f2);
+
+	int *arr;
+	if( (arr=(int*)shmat(shmid, NULL, 0)) == (int*)-1 ){
+		perror("Can't attach to shared memory\n");
+		exit(1);
+	}
+
+	arr[0] = f1;
+	arr[1] = f2;
+	
+		
+	if (! (f1 && f2) ){
+		fprintf(stderr, "Error with open pipes : %s\n", strerror(errno));
+		return 0;
+	}
+	
+	printf("Descriptors: %d %d\n", f1, f2);
+
+	fd_set read_set;
+	
+	while(1)
+	{
+		signal(SIGINT, mysignal_handler);	
+	
+		FD_ZERO(&read_set);
+		FD_SET(f1, &read_set);
+		FD_SET(f2, &read_set);
+	
+		int result = select(f2+1, &read_set, NULL, NULL, NULL);
+
+		if (result)
+		{
+			printf("select returned %d\n", result);
+			if( FD_ISSET(f1, &read_set) )
+				read_and_report(f1);
+			if( FD_ISSET(f2, &read_set) )
+				read_and_report(f2);
+		}		
+	}
+	
+	return 0;
+}
