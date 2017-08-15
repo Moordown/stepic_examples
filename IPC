@@ -13,12 +13,14 @@
 #include <string.h>
 #include <signal.h>
 #include <stdlib.h>
+
 char pathname[100];
 extern int errno;
 
 // читает фаловые дескрипторы из shared memory и закрывает их
 void mysignal_handler(int signalno){
-	// перед стоками стоит знак переноса строки, т.к. пользоваетелем посылается сигнал, и чтобы сохранить формат мы переносим.
+	// перед стоками стоит знак переноса строки, т.к. пользоваетелем посылается сигнал, 
+	// и чтобы сохранить формат мы переносим.
         int shmid; key_t key;
         if ( (key=ftok(pathname, 0)) < 0 )
         {
